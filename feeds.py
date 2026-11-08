@@ -1,4 +1,4 @@
-"""Gera RSS (inclui RIETI filtrado) a partir de paginas sem feed: JCER (ingles) e NRI (Kiuchi's View, NRI Finsights).
+"""Gera RSS a partir de paginas sem feed (JCER, NRI) e espelha feeds que o Inoreader nao atualiza (RIETI filtrado, Daiwa DIR).
 Uso: python3 code/27_feeds_jcer_nri.py  -> docs/jcer_en.xml, nri_kiuchi.xml, nri_finsights.xml
 Sem dependencias alem de requests. Rodar de tempos em tempos; o leitor (Inoreader) precisa de uma URL publica."""
 import requests,re,html,datetime as dt
@@ -41,8 +41,17 @@ def rieti():
         if any(x in sj for x in drop) or not K.search(ti) or not d: continue
         out.append((dt.date.fromisoformat(d),ti,ln))
     return out,tot
+def daiwa():
+    t=get('https://www.dir.co.jp/english/research/report/feed/rss.atom');out=[]
+    for it in re.findall(r'<item>(.*?)</item>',t,re.S):
+        g=lambda p:(re.findall(p,it,re.S) or [''])[0]
+        ti=clean(re.sub(r'<!\[CDATA\[|\]\]>','',g(r'<title>(.*?)</title>')));ln=g(r'<link>(.*?)</link>').strip();pd=g(r'<pubDate>(.*?)</pubDate>').strip()
+        try: d=dt.datetime.strptime(pd[:16],'%a, %d %b %Y').date()
+        except ValueError: continue
+        if ti and ln: out.append((d,ti,ln))
+    return out
 # minimos esperados: abaixo disso o feed antigo e preservado e o workflow falha (GitHub avisa por e-mail)
-MIN={'jcer_en':6,'nri_kiuchi':50,'nri_finsights':50,'rieti_macro':10}
+MIN={'jcer_en':6,'nri_kiuchi':50,'nri_finsights':50,'rieti_macro':10,'daiwa_en':5}
 fontes={'jcer_en':('JCER (English)','https://www.jcer.or.jp/en',jcer()),
 'nri_kiuchi':("Takahide Kiuchi's View (NRI)",'https://www.nri.com/en/media/journal/kiuchi',nri('https://www.nri.com/en/media/journal/kiuchi',r'/kiuchi/(\d{8})\.html')),
 'nri_finsights':('NRI Financial IT Focus / NRI FinSights','https://www.nri.com/en/media/column/nri_finsights',nri('https://www.nri.com/en/media/column/nri_finsights',r'/nri_finsights/(\d{8})(?:_\d)?\.html'))}
@@ -51,6 +60,10 @@ try:
     fontes['rieti_macro']=('RIETI (macro, filtrado por titulo)','https://www.rieti.go.jp/en/',r_it if r_tot>=100 else [])
 except Exception as e:
     print('rieti erro',e);fontes['rieti_macro']=('RIETI (macro)','https://www.rieti.go.jp/en/',[])
+try:
+    fontes['daiwa_en']=('Daiwa Institute of Research (English reports)','https://www.dir.co.jp/english/research/report/',daiwa())
+except Exception as e:
+    print('daiwa erro',e);fontes['daiwa_en']=('Daiwa Institute of Research (English reports)','https://www.dir.co.jp/english/research/report/',[])
 falhas=[]
 for k,(n,l,it) in fontes.items():
     if len(it)<MIN[k]:
