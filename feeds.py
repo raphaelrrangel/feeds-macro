@@ -1,4 +1,4 @@
-"""Gera RSS a partir de paginas sem feed: JCER (ingles) e NRI (Kiuchi's View, NRI Finsights).
+"""Gera RSS (inclui RIETI filtrado) a partir de paginas sem feed: JCER (ingles) e NRI (Kiuchi's View, NRI Finsights).
 Uso: python3 code/27_feeds_jcer_nri.py  -> docs/jcer_en.xml, nri_kiuchi.xml, nri_finsights.xml
 Sem dependencias alem de requests. Rodar de tempos em tempos; o leitor (Inoreader) precisa de uma URL publica."""
 import requests,re,html,datetime as dt
@@ -30,8 +30,30 @@ def rss(nome,link,items):
     for d,ti,h in items:
         x.append(f'<item><title>{escape(ti)}</title><link>{escape(h)}</link><guid>{escape(h)}</guid><pubDate>{d.strftime("%a, %d %b %Y 00:00:00 GMT")}</pubDate></item>')
     x.append('</channel></rss>');return '\n'.join(x)
+def rieti():
+    t=get('https://www.rieti.go.jp/en/rss/index.rdf');out=[];tot=0
+    drop=('Symposiums','Workshops','Recent Activities','(Japanese)')
+    K=re.compile(r'inflation|\byen\b|\bJGBs?\b|government bond|\bbonds?\b|interest rate|monetary|bank of japan|\bBOJ\b|central bank|fiscal|exchange rate|currenc|macroeconom|franc|oil price|tariff|\bwages?\b|current account|imbalances|\bFed\b|Balassa',re.I)
+    for it in re.findall(r'<item .*?</item>',t,re.S):
+        g=lambda p:(re.findall(p,it,re.S) or [''])[0]
+        ti=clean(g(r'<title>(.*?)</title>'));ln=g(r'<link>(.*?)</link>').replace('http://','https://').replace('?ref=rss','');sj=clean(g(r'<dc:subject>(.*?)</dc:subject>'));d=g(r'<dc:date>(.*?)</dc:date>')[:10]
+        tot+=1
+        if any(x in sj for x in drop) or not K.search(ti) or not d: continue
+        out.append((dt.date.fromisoformat(d),ti,ln))
+    return out,tot
+# minimos esperados: abaixo disso o feed antigo e preservado e o workflow falha (GitHub avisa por e-mail)
+MIN={'jcer_en':6,'nri_kiuchi':50,'nri_finsights':50,'rieti_macro':10}
 fontes={'jcer_en':('JCER (English)','https://www.jcer.or.jp/en',jcer()),
 'nri_kiuchi':("Takahide Kiuchi's View (NRI)",'https://www.nri.com/en/media/journal/kiuchi',nri('https://www.nri.com/en/media/journal/kiuchi',r'/kiuchi/(\d{8})\.html')),
 'nri_finsights':('NRI Financial IT Focus / NRI FinSights','https://www.nri.com/en/media/column/nri_finsights',nri('https://www.nri.com/en/media/column/nri_finsights',r'/nri_finsights/(\d{8})(?:_\d)?\.html'))}
+try:
+    r_it,r_tot=rieti();print('rieti bruto',r_tot)
+    fontes['rieti_macro']=('RIETI (macro, filtrado por titulo)','https://www.rieti.go.jp/en/',r_it if r_tot>=100 else [])
+except Exception as e:
+    print('rieti erro',e);fontes['rieti_macro']=('RIETI (macro)','https://www.rieti.go.jp/en/',[])
+falhas=[]
 for k,(n,l,it) in fontes.items():
-    open(f'docs/{k}.xml','w',encoding='utf-8').write(rss(n,l,it));print(k,len(it),'itens; mais recente:',max(it)[0] if it else None, '|', max(it)[1][:70] if it else '')
+    if len(it)<MIN[k]:
+        falhas.append(f'{k}: {len(it)} itens < minimo {MIN[k]}');print('FALHA',falhas[-1]);continue
+    open(f'docs/{k}.xml','w',encoding='utf-8').write(rss(n,l,it));print(k,len(it),'itens; mais recente:',max(it)[0],'|',max(it)[1][:70])
+if falhas: raise SystemExit('Feeds com poucos itens (layout mudou?): '+'; '.join(falhas))
