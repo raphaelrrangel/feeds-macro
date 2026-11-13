@@ -5,7 +5,21 @@ import requests,re,html,datetime as dt
 from xml.sax.saxutils import escape
 H={'User-Agent':'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36'}
 HOJE=dt.date.today()
-def get(u): return requests.get(u,headers=H,timeout=30).text
+import time,sys
+def get(u,tentativas=3):
+    # tentativas com espera: o GitHub Actions as vezes recebe timeout/403/5xx temporario dos sites
+    ult=None
+    for i in range(tentativas):
+        try:
+            r=requests.get(u,headers=H,timeout=(10,25));r.raise_for_status();return r.text
+        except Exception as e:
+            ult=e;print(f'aviso: {u} tentativa {i+1}/{tentativas}: {type(e).__name__} {e}',file=sys.stderr);time.sleep(5*(i+1))
+    raise ult
+def seguro(f,*a):
+    # uma fonte que falha nao derruba as outras: devolve [] e o minimo abaixo preserva o feed antigo
+    try: return f(*a)
+    except Exception as e:
+        print(f'ERRO {f.__name__}: {type(e).__name__} {e}',file=sys.stderr);return []
 def clean(x): return re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>','',x))).strip()
 def jcer():
     t=get('https://www.jcer.or.jp/en');out=[];seen=set()
@@ -52,9 +66,9 @@ def daiwa():
     return out
 # minimos esperados: abaixo disso o feed antigo e preservado e o workflow falha (GitHub avisa por e-mail)
 MIN={'jcer_en':6,'nri_kiuchi':50,'nri_finsights':50,'rieti_macro':10,'daiwa_en':5}
-fontes={'jcer_en':('JCER (English)','https://www.jcer.or.jp/en',jcer()),
-'nri_kiuchi':("Takahide Kiuchi's View (NRI)",'https://www.nri.com/en/media/journal/kiuchi',nri('https://www.nri.com/en/media/journal/kiuchi',r'/kiuchi/(\d{8})\.html')),
-'nri_finsights':('NRI Financial IT Focus / NRI FinSights','https://www.nri.com/en/media/column/nri_finsights',nri('https://www.nri.com/en/media/column/nri_finsights',r'/nri_finsights/(\d{8})(?:_\d)?\.html'))}
+fontes={'jcer_en':('JCER (English)','https://www.jcer.or.jp/en',seguro(jcer)),
+'nri_kiuchi':("Takahide Kiuchi's View (NRI)",'https://www.nri.com/en/media/journal/kiuchi',seguro(nri,'https://www.nri.com/en/media/journal/kiuchi',r'/kiuchi/(\d{8})\.html')),
+'nri_finsights':('NRI Financial IT Focus / NRI FinSights','https://www.nri.com/en/media/column/nri_finsights',seguro(nri,'https://www.nri.com/en/media/column/nri_finsights',r'/nri_finsights/(\d{8})(?:_\d)?\.html'))}
 try:
     r_it,r_tot=rieti();print('rieti bruto',r_tot)
     fontes['rieti_macro']=('RIETI (macro, filtrado por titulo)','https://www.rieti.go.jp/en/',r_it if r_tot>=100 else [])

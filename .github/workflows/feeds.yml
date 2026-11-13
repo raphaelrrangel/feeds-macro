@@ -12,7 +12,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: pip install requests beautifulsoup4 lxml
-      - run: python feeds.py
+      - id: feeds
+        run: python feeds.py
+        continue-on-error: true   # as fontes que deram certo ainda sao publicadas
       - run: |
           git config user.name "feeds-bot"; git config user.email "feeds-bot@users.noreply.github.com"
-          git add docs; git diff --cached --quiet || (git commit -m "atualiza feeds" && git push)
+          git add docs; git diff --cached --quiet || (git commit -m "atualiza feeds" && git pull --rebase -q && git push)
+      - if: steps.feeds.outcome == 'failure'
+        run: echo 'Alguma fonte falhou (ver o passo feeds.py); as outras foram publicadas.' && exit 1
