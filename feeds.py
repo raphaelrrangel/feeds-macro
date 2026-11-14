@@ -78,9 +78,24 @@ try:
     fontes['daiwa_en']=('Daiwa Institute of Research (English reports)','https://www.dir.co.jp/english/research/report/',daiwa())
 except Exception as e:
     print('daiwa erro',e);fontes['daiwa_en']=('Daiwa Institute of Research (English reports)','https://www.dir.co.jp/english/research/report/',[])
-falhas=[]
+# estado: ultima data em que cada feed foi gerado com o minimo de itens (docs/status.json). Uma fonte fora do ar
+# (manutencao, ex.: JCER em 14-11) so derruba o workflow se passar de TOLERANCIA_DIAS sem atualizar; antes disso
+# o feed antigo e mantido e o aviso fica no log.
+import json,os
+TOLERANCIA_DIAS=3
+ARQ_ST='docs/status.json'
+try: st=json.load(open(ARQ_ST,encoding='utf-8'))
+except Exception: st={}
+falhas=[];avisos=[]
 for k,(n,l,it) in fontes.items():
     if len(it)<MIN[k]:
-        falhas.append(f'{k}: {len(it)} itens < minimo {MIN[k]}');print('FALHA',falhas[-1]);continue
-    open(f'docs/{k}.xml','w',encoding='utf-8').write(rss(n,l,it));print(k,len(it),'itens; mais recente:',max(it)[0],'|',max(it)[1][:70])
-if falhas: raise SystemExit('Feeds com poucos itens (layout mudou?): '+'; '.join(falhas))
+        ult=dt.date.fromisoformat(st.setdefault(k,HOJE.isoformat()))   # sem registro: o relogio comeca hoje
+        dias=(HOJE-ult).days
+        msg=f'{k}: {len(it)} itens < minimo {MIN[k]}; feed antigo preservado; ultima atualizacao boa {ult} ({dias} dias)'
+        if dias>TOLERANCIA_DIAS: falhas.append(msg);print('FALHA',msg)
+        else: avisos.append(msg);print('::warning::'+msg)
+        continue
+    open(f'docs/{k}.xml','w',encoding='utf-8').write(rss(n,l,it));st[k]=HOJE.isoformat()
+    print(k,len(it),'itens; mais recente:',max(it)[0],'|',max(it)[1][:70])
+json.dump(st,open(ARQ_ST,'w',encoding='utf-8'),indent=1,sort_keys=True)
+if falhas: raise SystemExit(f'Feeds sem atualizar ha mais de {TOLERANCIA_DIAS} dias (layout mudou ou site fora do ar?): '+'; '.join(falhas))
