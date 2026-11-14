@@ -11,7 +11,9 @@ def get(u,tentativas=3):
     ult=None
     for i in range(tentativas):
         try:
-            r=requests.get(u,headers=H,timeout=(10,25));r.raise_for_status();return r.text
+            r=requests.get(u,headers=H,timeout=(10,25));r.raise_for_status()
+            if 'charset' not in r.headers.get('content-type','').lower(): r.encoding='utf-8'   # sem charset o requests assume latin-1 e estraga acentos
+            return r.text
         except Exception as e:
             ult=e;print(f'aviso: {u} tentativa {i+1}/{tentativas}: {type(e).__name__} {e}',file=sys.stderr);time.sleep(5*(i+1))
     raise ult
@@ -20,14 +22,16 @@ def seguro(f,*a):
     try: return f(*a)
     except Exception as e:
         print(f'ERRO {f.__name__}: {type(e).__name__} {e}',file=sys.stderr);return []
-def clean(x): return re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>','',x))).strip()
+INVALIDO=re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]')   # caracteres que tornam o XML invalido
+def clean(x): return re.sub(r'\s+',' ',INVALIDO.sub('',html.unescape(re.sub(r'<[^>]+>','',x)))).strip()
 def jcer():
     t=get('https://www.jcer.or.jp/en');out=[];seen=set()
     for h,body in re.findall(r'<a href="(https://www\.jcer\.or\.jp/english/[^"]+)">(.*?)</a>',t,re.S):
         d=re.findall(r'<dt>(\d\d)/(\d\d)',body);ti=re.findall(r'<dd>(.*?)</dd>',body,re.S)
         if not d or not ti or h in seen: continue
-        seen.add(h);m,dd=int(d[0][0]),int(d[0][1]);y=HOJE.year if dt.date(HOJE.year,m,dd)<=HOJE else HOJE.year-1
-        out.append((dt.date(y,m,dd),clean(ti[0]),h))
+        seen.add(h);m,dd=int(d[0][0]),int(d[0][1])
+        try: y=HOJE.year if dt.date(HOJE.year,m,dd)<=HOJE else HOJE.year-1;out.append((dt.date(y,m,dd),clean(ti[0]),h))
+        except ValueError: print('aviso: jcer data invalida',m,dd,file=sys.stderr)   # um item ruim nao derruba os outros
     return out
 def nri(url,pat):
     t=get(url);out=[];seen=set()
@@ -36,7 +40,8 @@ def nri(url,pat):
         if not m or h in seen: continue
         seen.add(h);ds=m.group(1);ti=clean(body).split(' Oct.')[0].split(' Nov.')[0]
         ti=re.sub(r"\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\. \d\d, \d{4}.*$",'',ti)
-        out.append((dt.date(int(ds[:4]),int(ds[4:6]),int(ds[6:8])),ti,'https://www.nri.com'+h if h.startswith('/') else h))
+        try: out.append((dt.date(int(ds[:4]),int(ds[4:6]),int(ds[6:8])),ti,'https://www.nri.com'+h if h.startswith('/') else h))
+        except ValueError: print('aviso: nri data invalida',ds,file=sys.stderr)
     return out
 def rss(nome,link,items):
     items=sorted(items,reverse=True)
@@ -53,7 +58,8 @@ def rieti():
         ti=clean(g(r'<title>(.*?)</title>'));ln=g(r'<link>(.*?)</link>').replace('http://','https://').replace('?ref=rss','');sj=clean(g(r'<dc:subject>(.*?)</dc:subject>'));d=g(r'<dc:date>(.*?)</dc:date>')[:10]
         tot+=1
         if any(x in sj for x in drop) or not K.search(ti) or not d: continue
-        out.append((dt.date.fromisoformat(d),ti,ln))
+        try: out.append((dt.date.fromisoformat(d),ti,ln))
+        except ValueError: print('aviso: rieti data invalida',d,file=sys.stderr)
     return out,tot
 def daiwa():
     t=get('https://www.dir.co.jp/english/research/report/feed/rss.atom');out=[]
@@ -78,24 +84,25 @@ try:
     fontes['daiwa_en']=('Daiwa Institute of Research (English reports)','https://www.dir.co.jp/english/research/report/',daiwa())
 except Exception as e:
     print('daiwa erro',e);fontes['daiwa_en']=('Daiwa Institute of Research (English reports)','https://www.dir.co.jp/english/research/report/',[])
-# estado: ultima data em que cada feed foi gerado com o minimo de itens (docs/status.json). Uma fonte fora do ar
-# (manutencao, ex.: JCER em 14-11) so derruba o workflow se passar de TOLERANCIA_DIAS sem atualizar; antes disso
-# o feed antigo e mantido e o aviso fica no log.
+# estado: docs/status.json guarda, para cada feed que esta falhando, desde que dia (some quando o feed volta).
+# Uma fonte fora do ar (manutencao, ex.: JCER em 14-11) so derruba o workflow se passar de TOLERANCIA_DIAS
+# falhando; antes disso o feed antigo e mantido e o aviso fica no log. Sem falha, o arquivo nao muda (sem commit diario).
 import json,os
 TOLERANCIA_DIAS=3
 ARQ_ST='docs/status.json'
 try: st=json.load(open(ARQ_ST,encoding='utf-8'))
 except Exception: st={}
-falhas=[];avisos=[]
+falhas=[]
 for k,(n,l,it) in fontes.items():
     if len(it)<MIN[k]:
-        ult=dt.date.fromisoformat(st.setdefault(k,HOJE.isoformat()))   # sem registro: o relogio comeca hoje
-        dias=(HOJE-ult).days
-        msg=f'{k}: {len(it)} itens < minimo {MIN[k]}; feed antigo preservado; ultima atualizacao boa {ult} ({dias} dias)'
+        desde=dt.date.fromisoformat(st.setdefault(k,HOJE.isoformat()));dias=(HOJE-desde).days   # sem registro: o relogio comeca hoje
+        msg=f'{k}: {len(it)} itens < minimo {MIN[k]}; feed antigo preservado; falhando desde {desde} ({dias} dias)'
         if dias>TOLERANCIA_DIAS: falhas.append(msg);print('FALHA',msg)
-        else: avisos.append(msg);print('::warning::'+msg)
+        else: print('::warning::'+msg)
         continue
-    open(f'docs/{k}.xml','w',encoding='utf-8').write(rss(n,l,it));st[k]=HOJE.isoformat()
+    st.pop(k,None)
+    tmp=f'docs/{k}.xml.tmp'   # escrita atomica: um corte no meio nao deixa feed truncado
+    open(tmp,'w',encoding='utf-8').write(rss(n,l,it));os.replace(tmp,f'docs/{k}.xml')
     print(k,len(it),'itens; mais recente:',max(it)[0],'|',max(it)[1][:70])
-json.dump(st,open(ARQ_ST,'w',encoding='utf-8'),indent=1,sort_keys=True)
-if falhas: raise SystemExit(f'Feeds sem atualizar ha mais de {TOLERANCIA_DIAS} dias (layout mudou ou site fora do ar?): '+'; '.join(falhas))
+if st or os.path.exists(ARQ_ST): json.dump(st,open(ARQ_ST,'w',encoding='utf-8'),indent=1,sort_keys=True)
+if falhas: raise SystemExit(f'Feeds falhando ha mais de {TOLERANCIA_DIAS} dias (layout mudou ou site fora do ar?): '+'; '.join(falhas))
