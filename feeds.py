@@ -88,7 +88,7 @@ except Exception as e:
 # Uma fonte fora do ar (manutencao, ex.: JCER em 14-11) so derruba o workflow se passar de TOLERANCIA_DIAS
 # falhando; antes disso o feed antigo e mantido e o aviso fica no log. Sem falha, o arquivo nao muda (sem commit diario).
 import json,os
-TOLERANCIA_DIAS=3
+TOLERANCIA_DIAS=1
 ARQ_ST='docs/status.json'
 try: st=json.load(open(ARQ_ST,encoding='utf-8'))
 except Exception: st={}
