@@ -4,14 +4,17 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: atualizar-feeds   # disparo manual e agendado nunca rodam juntos (evita corrida no push)
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: {python-version: '3.11'}
-      - run: pip install requests beautifulsoup4 lxml
+      - run: pip install requests
       - id: feeds
         run: python feeds.py
         continue-on-error: true   # as fontes que deram certo ainda sao publicadas
