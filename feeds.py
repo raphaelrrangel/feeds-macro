@@ -105,4 +105,19 @@ for k,(n,l,it) in fontes.items():
     open(tmp,'w',encoding='utf-8').write(rss(n,l,it));os.replace(tmp,f'docs/{k}.xml')
     print(k,len(it),'itens; mais recente:',max(it)[0],'|',max(it)[1][:70])
 if st or os.path.exists(ARQ_ST): json.dump(st,open(ARQ_ST,'w',encoding='utf-8'),indent=1,sort_keys=True)
+# fonte parada: o feed foi gerado normalmente, mas o item mais recente esta velho demais para a cadencia da fonte.
+# Nao derruba o workflow (nao e erro de maquina): grava docs/parados.json e o workflow abre/fecha uma issue por fonte.
+# O arquivo guarda so datas e limites (estaveis), entao nao gera commit diario.
+LIMITE_IDADE={'rieti_macro':14,'jcer_en':21,'nri_finsights':45,'daiwa_en':75,'nri_kiuchi':75}   # dias, pela cadencia real
+ARQ_PA='docs/parados.json'
+try: pa=json.load(open(ARQ_PA,encoding='utf-8'))
+except Exception: pa={}
+pa0=json.dumps(pa,sort_keys=True)
+for k,(n,l,it) in fontes.items():
+    if len(it)<MIN[k]: continue   # fonte com falha: o estado anterior fica como esta
+    ult=max(it)[0];idade=(HOJE-ult).days
+    if idade>LIMITE_IDADE[k]:
+        pa[k]={'ultimo_item':ult.isoformat(),'limite_dias':LIMITE_IDADE[k]};print(f'::warning::{k}: parado, item mais recente {ult} ({idade} dias; limite {LIMITE_IDADE[k]})')
+    else: pa.pop(k,None)
+if json.dumps(pa,sort_keys=True)!=pa0 or (pa and not os.path.exists(ARQ_PA)): json.dump(pa,open(ARQ_PA,'w',encoding='utf-8'),indent=1,sort_keys=True)
 if falhas: raise SystemExit(f'Feeds falhando ha mais de {TOLERANCIA_DIAS} dias (layout mudou ou site fora do ar?): '+'; '.join(falhas))
